@@ -53,6 +53,9 @@ function decodePayload(payload) {
 }
 
 const BLOCKLIST_KEY_PREFIX = 'lumen.pubsub_chat.blocklist.v1:';
+const MY_NICK_KEY = 'lumen.pubsub_chat.myNick.v1';
+const CHAT_DB_NAME = 'lumen_pubsub_chat_v1';
+const CHAT_DB_VERSION = 1;
 
 function blocklistStorageKey(topic) {
   return `${BLOCKLIST_KEY_PREFIX}${encodeURIComponent(String(topic || '').trim())}`;
@@ -76,9 +79,173 @@ function saveBlocklist(topic, blocklist) {
   } catch {}
 }
 
+function loadMyNick() {
+  try {
+    const s = String(localStorage.getItem(MY_NICK_KEY) || '').trim();
+    return s ? s.slice(0, 22) : '';
+  } catch {
+    return '';
+  }
+}
+
+function saveMyNick(nick) {
+  try {
+    const s = String(nick || '').trim().slice(0, 22);
+    if (!s) return;
+    localStorage.setItem(MY_NICK_KEY, s);
+  } catch {}
+}
+
+let CHAT_DB_PROMISE = null;
+
+function openChatDb() {
+  if (CHAT_DB_PROMISE) return CHAT_DB_PROMISE;
+  CHAT_DB_PROMISE = new Promise((resolve, reject) => {
+    try {
+      const idb = window?.indexedDB;
+      if (!idb) return reject(new Error('indexedDB unavailable'));
+      const req = idb.open(CHAT_DB_NAME, CHAT_DB_VERSION);
+      req.onerror = () => reject(req.error || new Error('db_open_failed'));
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains('messages')) {
+          const store = db.createObjectStore('messages', { keyPath: 'pk' });
+          store.createIndex('by_topic_ts', ['topic', 'ts'], { unique: false });
+        }
+        if (!db.objectStoreNames.contains('names')) {
+          const store = db.createObjectStore('names', { keyPath: 'pk' });
+          store.createIndex('by_topic', 'topic', { unique: false });
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+    } catch (e) {
+      reject(e);
+    }
+  });
+  return CHAT_DB_PROMISE;
+}
+
+function dbTx(db, storeNames, mode) {
+  const tx = db.transaction(storeNames, mode);
+  const done = new Promise((resolve, reject) => {
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error || new Error('tx_failed'));
+    tx.onabort = () => reject(tx.error || new Error('tx_aborted'));
+  });
+  return { tx, done };
+}
+
+async function dbPutName(topic, addr, nick, updatedAt) {
+  const t = String(topic || '').trim();
+  const a = String(addr || '').trim();
+  const n = String(nick || '').trim().slice(0, 22);
+  if (!t || !a || !n) return;
+  const db = await openChatDb();
+  const { tx, done } = dbTx(db, ['names'], 'readwrite');
+  tx.objectStore('names').put({ pk: `${t}|${a}`, topic: t, addr: a, nick: n, updatedAt: Number(updatedAt || 0) || nowMs() });
+  await done;
+}
+
+async function dbGetNames(topic) {
+  const t = String(topic || '').trim();
+  if (!t) return {};
+  const db = await openChatDb();
+  const { tx, done } = dbTx(db, ['names'], 'readonly');
+  const store = tx.objectStore('names');
+  const idx = store.index('by_topic');
+  const out = {};
+  await new Promise((resolve, reject) => {
+    const req = idx.openCursor(IDBKeyRange.only(t));
+    req.onerror = () => reject(req.error || new Error('cursor_failed'));
+    req.onsuccess = () => {
+      const cur = req.result;
+      if (!cur) return resolve();
+      try {
+        const v = cur.value;
+        const addr = String(v?.addr || '').trim();
+        const nick = String(v?.nick || '').trim();
+        if (addr && nick) out[addr] = nick;
+      } catch {}
+      cur.continue();
+    };
+  });
+  await done.catch(() => {});
+  return out;
+}
+
+async function dbPutMessage(topic, entry) {
+  const t = String(topic || '').trim();
+  const id = String(entry?.id || '').trim();
+  const addr = String(entry?.addr || '').trim();
+  const text = String(entry?.text || '');
+  const ts = Number(entry?.ts || 0) || nowMs();
+  if (!t || !id || !addr) return;
+  const db = await openChatDb();
+  const { tx, done } = dbTx(db, ['messages'], 'readwrite');
+  tx.objectStore('messages').put({ pk: `${t}|${id}`, topic: t, ts, id, addr, text });
+  await done;
+}
+
+async function dbGetRecentMessages(topic, limit = 240) {
+  const t = String(topic || '').trim();
+  const lim = Math.max(1, Math.min(2000, Number(limit || 0) || 240));
+  if (!t) return [];
+  const db = await openChatDb();
+  const { tx, done } = dbTx(db, ['messages'], 'readonly');
+  const store = tx.objectStore('messages');
+  const idx = store.index('by_topic_ts');
+  const maxTs = Number.MAX_SAFE_INTEGER;
+  const range = IDBKeyRange.bound([t, 0], [t, maxTs]);
+  const rows = [];
+  await new Promise((resolve, reject) => {
+    const req = idx.openCursor(range, 'prev');
+    req.onerror = () => reject(req.error || new Error('cursor_failed'));
+    req.onsuccess = () => {
+      const cur = req.result;
+      if (!cur) return resolve();
+      rows.push(cur.value);
+      if (rows.length >= lim) return resolve();
+      cur.continue();
+    };
+  });
+  await done.catch(() => {});
+  rows.reverse();
+  return rows.map((r) => ({
+    id: String(r?.id || '').trim(),
+    addr: String(r?.addr || '').trim(),
+    text: String(r?.text || ''),
+    ts: Number(r?.ts || 0) || nowMs(),
+  })).filter((m) => m.id && m.addr);
+}
+
+async function dbClearMessages(topic) {
+  const t = String(topic || '').trim();
+  if (!t) return;
+  const db = await openChatDb();
+  const { tx, done } = dbTx(db, ['messages'], 'readwrite');
+  const store = tx.objectStore('messages');
+  const idx = store.index('by_topic_ts');
+  const maxTs = Number.MAX_SAFE_INTEGER;
+  const range = IDBKeyRange.bound([t, 0], [t, maxTs]);
+  await new Promise((resolve, reject) => {
+    const req = idx.openCursor(range);
+    req.onerror = () => reject(req.error || new Error('cursor_failed'));
+    req.onsuccess = () => {
+      const cur = req.result;
+      if (!cur) return resolve();
+      try { cur.delete(); } catch {}
+      cur.continue();
+    };
+  });
+  await done.catch(() => {});
+}
+
 const POW_DIFFICULTY_BITS = 12;
 const AUTO_BLOCK_WINDOW_MS = 2000;
 const AUTO_BLOCK_MAX_MESSAGES = 10;
+const HEARTBEAT_INTERVAL_MS = 60_000;
+const HEARTBEAT_FIRST_DELAY_MS = 12_000;
+const PEER_STALE_MS = 12_000;
 
 function leadingZeroBits(bytes) {
   let bits = 0;
@@ -154,7 +321,7 @@ function useToast() {
 
 function App() {
   const [room, setRoom] = useState('lobby');
-  const [nick, setNick] = useState('anon-' + randHex(3));
+  const [nick, setNick] = useState(() => loadMyNick() || 'anon-' + randHex(3));
   const [text, setText] = useState('');
   const [status, setStatus] = useState({ connected: false, topic: '', subId: '', address: '', topics: [] });
   const [err, setErr] = useState('');
@@ -178,6 +345,12 @@ function App() {
   const seenMsgIdRef = useRef(new Set()); // message ids
   const spamWindowRef = useRef(new Map()); // addr -> timestamps (last 2s)
   const blockedByAddrRef = useRef({});
+  const lastPeerSeenAtRef = useRef(0);
+  const lastRemoteSeenAtRef = useRef(0);
+  const lastHeartbeatAtRef = useRef(0);
+  const lastPersistedNameRef = useRef(new Map()); // addr -> nick
+  const heartbeatInFlightRef = useRef(false);
+  const sendingRef = useRef(false);
   const topicRef = useRef(`lumen/pubsub_chat/v1/${String(room || 'lobby').trim().toLowerCase()}`);
 
   const topic = useMemo(
@@ -196,8 +369,33 @@ function App() {
   }, [topic]);
 
   useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const [names, msgs] = await Promise.all([
+          dbGetNames(topic).catch(() => ({})),
+          dbGetRecentMessages(topic, 240).catch(() => []),
+        ]);
+        if (!alive) return;
+        const blocked = loadBlocklist(topic);
+        lastPersistedNameRef.current = new Map(Object.entries(names || {}));
+        setNameByAddr(names || {});
+        setMessages(Array.isArray(msgs) ? msgs.filter((m) => !blocked[String(m?.addr || '').trim()]) : []);
+      } catch {}
+    })();
+    return () => {
+      alive = false;
+    };
+  }, [topic]);
+
+  useEffect(() => {
     blockedByAddrRef.current = blockedByAddr || {};
     saveBlocklist(topicRef.current, blockedByAddrRef.current);
+  }, [blockedByAddr]);
+
+  useEffect(() => {
+    const blocked = blockedByAddr || {};
+    setMessages((prev) => prev.filter((m) => !blocked[String(m?.addr || '').trim()]));
   }, [blockedByAddr]);
 
   function canSendNow() {
@@ -216,6 +414,18 @@ function App() {
   useEffect(() => {
     scrollToBottom();
   }, [messages.length]);
+
+  useEffect(() => {
+    saveMyNick(nick);
+  }, [nick]);
+
+  useEffect(() => {
+    if (status.address) updateName(status.address, nick);
+  }, [status.address, nick]);
+
+  useEffect(() => {
+    sendingRef.current = sending;
+  }, [sending]);
 
   async function getActiveProfile() {
     const api = L();
@@ -293,6 +503,11 @@ function App() {
       if (prev[addr] === nn) return prev;
       return { ...prev, [addr]: nn };
     });
+    const last = lastPersistedNameRef.current.get(addr) || '';
+    if (last !== nn) {
+      lastPersistedNameRef.current.set(addr, nn);
+      void dbPutName(topicRef.current, addr, nn, nowMs()).catch(() => {});
+    }
   }
 
   function isBlocked(address) {
@@ -346,6 +561,7 @@ function App() {
       next.push(entry);
       return next;
     });
+    void dbPutMessage(topicRef.current, entry).catch(() => {});
   }
 
   async function publishSigned(type, fields) {
@@ -389,18 +605,20 @@ function App() {
       return;
     }
 
-    setMessages([]);
-    setNameByAddr({});
     setRxStats({ total: 0, accepted: 0, dropped: 0, lastDrop: '' });
     lastAcceptedAtRef.current = new Map();
     recentNoncesRef.current = new Map();
     seenMsgIdRef.current = new Set();
     spamWindowRef.current = new Map();
+    lastPeerSeenAtRef.current = 0;
+    lastRemoteSeenAtRef.current = 0;
+    lastHeartbeatAtRef.current = 0;
 
     show('Connecting', `Subscribing to ${topic}`, 'info', 2200);
 
     try {
-      const { address } = await getActiveProfile();
+      const { address: selfAddress } = await getActiveProfile();
+      updateName(selfAddress, nick);
       const sub = await api.pubsub.subscribe(
         topic,
         { encoding: 'json', autoConnect: true },
@@ -484,6 +702,8 @@ function App() {
             const safeNick = String(parsed.nick || '').trim().slice(0, 22);
             if (safeNick) updateName(canonicalAddr, safeNick);
 
+            const kind = String(parsed.type || '');
+
             const spamCount = recordSpam(canonicalAddr);
             if (spamCount > AUTO_BLOCK_MAX_MESSAGES) {
               blockUser(canonicalAddr, 'auto_spam', safeNick);
@@ -491,13 +711,18 @@ function App() {
               return;
             }
 
-            if (isRateLimited(canonicalAddr)) {
-              setRxStats((s) => ({ ...s, dropped: s.dropped + 1, lastDrop: 'rate_limited' }));
+            if (kind === 'profile') {
+              if (isRateLimited(canonicalAddr)) {
+                setRxStats((s) => ({ ...s, dropped: s.dropped + 1, lastDrop: 'rate_limited' }));
+                return;
+              }
+              if (canonicalAddr && canonicalAddr !== selfAddress) lastRemoteSeenAtRef.current = nowMs();
+              setRxStats((s) => ({ ...s, accepted: s.accepted + 1 }));
               return;
             }
 
-            const kind = String(parsed.type || '');
-            if (kind === 'profile') {
+            if (kind === 'ping') {
+              if (canonicalAddr && canonicalAddr !== selfAddress) lastRemoteSeenAtRef.current = nowMs();
               setRxStats((s) => ({ ...s, accepted: s.accepted + 1 }));
               return;
             }
@@ -506,6 +731,12 @@ function App() {
               setRxStats((s) => ({ ...s, dropped: s.dropped + 1, lastDrop: 'unknown_type' }));
               return;
             }
+
+            if (isRateLimited(canonicalAddr)) {
+              setRxStats((s) => ({ ...s, dropped: s.dropped + 1, lastDrop: 'rate_limited' }));
+              return;
+            }
+            if (canonicalAddr && canonicalAddr !== selfAddress) lastRemoteSeenAtRef.current = nowMs();
 
             const txt = String(parsed.text || '').trim();
             if (!txt) {
@@ -541,7 +772,7 @@ function App() {
         connected: true,
         topic,
         subId: String(sub.subId || ''),
-        address,
+        address: selfAddress,
         topics: Array.isArray(sub.topics) ? sub.topics : [],
       });
       show('Connected', `Room: ${room}`, 'success', 1800);
@@ -578,6 +809,7 @@ function App() {
       try {
         const res = await api?.pubsub?.peers?.(topic);
         const peers = Array.isArray(res?.peers) ? res.peers : [];
+        if (peers.length > 0) lastPeerSeenAtRef.current = nowMs();
         if (alive) setPeerCount(peers.length);
       } catch {}
     };
@@ -589,13 +821,41 @@ function App() {
     };
   }, [status.connected, topic]);
 
+  // Heartbeat (signed + PoW) to keep PubSub streams active.
+  useEffect(() => {
+    if (!status.connected) return;
+    let alive = true;
+
+    const tick = async () => {
+      if (!alive) return;
+      if (sendingRef.current) return;
+      const peerSeenAt = Math.max(lastPeerSeenAtRef.current, lastRemoteSeenAtRef.current);
+      if (!peerSeenAt) return; // don't mine heartbeats while truly alone
+      const now = nowMs();
+      if (now - lastHeartbeatAtRef.current < HEARTBEAT_INTERVAL_MS - 500) return;
+      if (heartbeatInFlightRef.current) return;
+
+      heartbeatInFlightRef.current = true;
+      try {
+        await publishSigned('ping', {});
+        lastHeartbeatAtRef.current = nowMs();
+      } catch {}
+      heartbeatInFlightRef.current = false;
+    };
+
+    const t0 = setTimeout(tick, HEARTBEAT_FIRST_DELAY_MS);
+    const t = setInterval(tick, HEARTBEAT_INTERVAL_MS);
+    return () => {
+      alive = false;
+      try { clearTimeout(t0); } catch {}
+      try { clearInterval(t); } catch {}
+      heartbeatInFlightRef.current = false;
+    };
+  }, [status.connected, topic]);
+
   async function sendMessage() {
     if (!status.connected) {
       show('Not connected', 'Connect to a room first', 'warning', 2200);
-      return;
-    }
-    if (peerCount <= 0) {
-      show('Waiting for users', 'You are currently alone in this room.', 'info', 2200);
       return;
     }
     if (sending) return;
@@ -608,6 +868,9 @@ function App() {
     if (!canSendNow()) {
       show('Slow down', '1 message per second', 'warning', 1600);
       return;
+    }
+    if (peerCount <= 0 && nowMs() - Math.max(lastPeerSeenAtRef.current, lastRemoteSeenAtRef.current) > PEER_STALE_MS) {
+      show('No peers detected', 'Message will be sent anyway, but may not be received yet.', 'info', 2400);
     }
     setSending(true);
     lastSentAtRef.current = nowMs();
@@ -665,8 +928,9 @@ function App() {
     return values;
   }, [blockedByAddr]);
 
-  const isAlone = status.connected && peerCount <= 0;
-  const composeDisabled = !status.connected || sending || peerCount <= 0;
+  const isAlone =
+    status.connected && peerCount <= 0 && nowMs() - Math.max(lastPeerSeenAtRef.current, lastRemoteSeenAtRef.current) > PEER_STALE_MS;
+  const composeDisabled = !status.connected || sending;
 
   const modalAddr = String(userModal?.addr || '').trim();
   const modalBlock = modalAddr ? blockedByAddr[modalAddr] : null;
@@ -740,8 +1004,9 @@ function App() {
                 {
                   className: 'btn',
                   type: 'button',
-                  onClick: () => {
+                  onClick: async () => {
                     setMessages([]);
+                    try { await dbClearMessages(topicRef.current); } catch {}
                     show('Cleared', 'Local chat cleared', 'info', 1400);
                   },
                 },
@@ -837,8 +1102,8 @@ function App() {
                       marginBottom: 10,
                     },
                   },
-                  React.createElement('b', { style: { color: '#fff' } }, 'You are currently alone.'),
-                  ' Waiting for users to join…'
+                  React.createElement('b', { style: { color: '#fff' } }, 'No peers detected yet.'),
+                  ' You can still send messages, but they may not be received until someone joins.'
                 )
               : null,
             messages.length
@@ -889,7 +1154,11 @@ function App() {
                   sendMessage();
                 }
               },
-              placeholder: status.connected ? (peerCount <= 0 ? 'Waiting for users…' : 'Type a message…') : 'Connect to a room to chat…',
+              placeholder: status.connected
+                ? isAlone
+                  ? 'No peers yet (you can still send).'
+                  : 'Type a message.'
+                : 'Connect to a room to chat.',
               disabled: composeDisabled,
             }),
             React.createElement(
