@@ -4,116 +4,362 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Lumen Demos</title>
+  <link rel="icon" type="image/png" href="logo.png" />
+  <link rel="shortcut icon" type="image/png" href="logo.png" />
   <style>
     :root{
-      --bg:#0b0b0b; --panel:#151515; --panel2:#101010; --text:#f3f3f3; --muted:#bdbdbd; --border:#242424;
-      --accent:#1db954; --danger:#f87171; --warn:#fbbf24; --info:#60a5fa;
-      --shadow:0 10px 30px rgba(0,0,0,.35);
+      --bg:#1a1a1a; --panel:#242424; --panel2:#2d2d2d; --text:#e0e0e0; --muted:#a8a8a8; --border:#333333;
+      --accent:#e50914; --accent-light:#f40612; --accent-dark:#b20710; --accent-soft:#ff6b6b;
+      --shadow:0 15px 35px rgba(0,0,0,.25);
+      --glow:0 0 30px rgba(229,9,20,.05);
+      --card-glow:0 0 20px rgba(229,9,20,.04);
     }
-    *{box-sizing:border-box}
-    html,body{height:100%}
-    body{margin:0;background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Cantarell,'Helvetica Neue',Arial}
-    a{color:inherit}
+    *{box-sizing:border-box;margin:0;padding:0}
+    html,body{height:100%;scroll-behavior:smooth}
+    body{
+      margin:0;
+      background:#1a1a1a;
+      color:var(--text);
+      font:16px/1.6 -apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;
+      -webkit-font-smoothing:antialiased;
+      -moz-osx-font-smoothing:grayscale;
+      overflow-x:hidden;
+      position:relative
+    }
+    body::before{
+      content:'';position:fixed;inset:0;z-index:0;
+      background:
+        radial-gradient(circle at 20% 50%, var(--accent)08 0%, transparent 50%),
+        radial-gradient(circle at 80% 80%, var(--accent)06 0%, transparent 50%),
+        radial-gradient(circle at 40% 20%, var(--accent)04 0%, transparent 50%);
+      animation:bgPulse 15s ease-in-out infinite;
+      pointer-events:none
+    }
+    body>*:not(script){position:relative;z-index:1}
+    
+    /* Animated Orbs/Planets */
+    .orb{
+      position:fixed;border-radius:50%;
+      filter:blur(60px);opacity:.4;
+      pointer-events:none;z-index:0
+    }
+    .orb1{
+      width:400px;height:400px;
+      background:radial-gradient(circle,var(--accent)40,transparent);
+      top:10%;left:5%;
+      animation:float1 20s ease-in-out infinite
+    }
+    .orb2{
+      width:300px;height:300px;
+      background:radial-gradient(circle,var(--accent-light)30,transparent);
+      top:60%;right:10%;
+      animation:float2 25s ease-in-out infinite
+    }
+    .orb3{
+      width:250px;height:250px;
+      background:radial-gradient(circle,var(--accent)25,transparent);
+      bottom:15%;left:50%;
+      animation:float3 18s ease-in-out infinite
+    }
+    
+    a{color:inherit;text-decoration:none}
+
+    @keyframes bgPulse{
+      0%,100%{opacity:.6;transform:scale(1)}
+      50%{opacity:1;transform:scale(1.1)}
+    }
+    @keyframes float1{
+      0%,100%{transform:translate(0,0) scale(1)}
+      33%{transform:translate(50px,-30px) scale(1.1)}
+      66%{transform:translate(-30px,40px) scale(.9)}
+    }
+    @keyframes float2{
+      0%,100%{transform:translate(0,0) scale(1)}
+      33%{transform:translate(-40px,50px) scale(1.15)}
+      66%{transform:translate(60px,-20px) scale(.95)}
+    }
+    @keyframes float3{
+      0%,100%{transform:translate(0,0) scale(1)}
+      33%{transform:translate(-50px,-40px) scale(1.05)}
+      66%{transform:translate(40px,30px) scale(.9)}
+    }
+
+    @keyframes float{
+      0%,100%{transform:translateY(0px)}
+      50%{transform:translateY(-6px)}
+    }
+    @keyframes shimmer{
+      0%{background-position:200% center}
+      100%{background-position:-200% center}
+    }
+    @keyframes fadeInUp{
+      from{opacity:0;transform:translateY(15px)}
+      to{opacity:1;transform:translateY(0)}
+    }
 
     .topbar{
-      height:56px;display:flex;align-items:center;gap:12px;padding:0 14px;
-      border-bottom:1px solid var(--border);
-      background:rgba(0,0,0,.55);backdrop-filter:blur(10px);
-      position:sticky;top:0;z-index:10
+      height:70px;display:flex;align-items:center;gap:16px;padding:0 40px;
+      border-bottom:1px solid rgba(229,9,20,.06);
+      background:rgba(26,26,26,.9);backdrop-filter:blur(16px);
+      position:sticky;top:0;z-index:100
     }
-    .brand{font-weight:900;color:var(--accent);letter-spacing:.2px}
-    .pill{border:1px solid var(--border);background:#101010;border-radius:999px;padding:4px 8px;font-size:12px;color:var(--muted)}
+    .brand{
+      display:flex;align-items:center;gap:12px;
+      font-weight:700;font-size:20px;
+      color:#e0e0e0;letter-spacing:-.2px
+    }
+    .brand img{
+      height:36px;width:auto;
+      filter:drop-shadow(0 2px 8px rgba(229,9,20,.2))
+    }
+    .pill{
+      border:1px solid rgba(229,9,20,.12);
+      background:rgba(229,9,20,.05);
+      border-radius:999px;padding:6px 12px;font-size:13px;
+      color:#ff8080;font-weight:500;
+      transition:all .3s ease
+    }
+    .pill:hover{
+      border-color:rgba(229,9,20,.2);
+      background:rgba(229,9,20,.08);
+      transform:translateY(-1px)
+    }
     .spacer{margin-left:auto}
 
-    .wrap{max-width:1100px;margin:0 auto;padding:16px}
+    .wrap{max-width:1220px;margin:0 auto;padding:56px 40px 72px;animation:fadeInUp .5s ease}
     .hero{
       background:
-        radial-gradient(900px 500px at 20% 10%, rgba(29,185,84,.16), transparent 60%),
-        radial-gradient(900px 500px at 90% 20%, rgba(96,165,250,.12), transparent 60%),
-        #070707;
-      border:1px solid var(--border);
-      border-radius:18px;
-      box-shadow:var(--shadow);
-      padding:16px 16px;
-      display:flex;gap:14px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap
+        radial-gradient(1000px 600px at 50% -5%, rgba(229,9,20,.04), transparent 60%),
+        radial-gradient(800px 450px at 80% 60%, rgba(229,9,20,.025), transparent 50%),
+        var(--panel);
+      border:1px solid rgba(229,9,20,.08);
+      border-radius:24px;
+      box-shadow:var(--glow),inset 0 1px 0 0 rgba(255,255,255,.015);
+      padding:72px 56px;
+      text-align:center;
+      position:relative;
+      overflow:hidden
     }
-    .heroTitle{font-size:20px;font-weight:900;letter-spacing:.2px;margin:0}
-    .heroText{margin:6px 0 0;color:var(--muted);max-width:72ch}
-    .heroRight{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+    .hero::before{
+      content:'';position:absolute;top:0;left:0;right:0;height:1px;
+      background:linear-gradient(90deg,transparent,rgba(229,9,20,.2),transparent);
+      animation:shimmer 5s linear infinite
+    }
+    .heroTitle{
+      font-size:58px;font-weight:700;letter-spacing:-1.2px;margin:0 0 18px;
+      line-height:1.1;
+      background:linear-gradient(135deg,#e0e0e0 0%,#c8c8c8 30%,#ff8080 100%);
+      background-size:200% auto;
+      -webkit-background-clip:text;-webkit-text-fill-color:transparent;
+      background-clip:text;
+      animation:float 6s ease-in-out infinite
+    }
+    .heroText{
+      margin:0 auto 36px;color:var(--muted);max-width:620px;font-size:17px;
+      line-height:1.65;font-weight:400
+    }
+    .heroText code{
+      background:rgba(229,9,20,.06);
+      border:1px solid rgba(229,9,20,.12);
+      padding:2px 8px;border-radius:6px;font-size:15px;
+      color:#ff8080;font-weight:500
+    }
+    .heroRight{display:flex;gap:14px;align-items:center;justify-content:center;flex-wrap:wrap}
 
     .btn{
-      border:1px solid var(--border);background:#1a1a1a;color:#fff;border-radius:12px;padding:10px 12px;cursor:pointer;
-      font:inherit;text-decoration:none;display:inline-flex;align-items:center;gap:8px
+      border:1px solid rgba(229,9,20,.15);
+      background:rgba(229,9,20,.06);
+      color:var(--text);border-radius:11px;padding:13px 26px;cursor:pointer;
+      font:inherit;font-weight:600;font-size:15px;text-decoration:none;
+      display:inline-flex;align-items:center;gap:9px;
+      transition:all .3s ease;
+      position:relative;overflow:hidden
     }
-    .btn:hover{background:#222}
-    .btn.primary{background:var(--accent);color:#000;border:none;font-weight:900}
-    .btn.primary:hover{filter:brightness(1.05)}
+    .btn::before{
+      content:'';position:absolute;top:0;left:-100%;width:100%;height:100%;
+      background:linear-gradient(90deg,transparent,rgba(255,255,255,.04),transparent);
+      transition:left .5s ease
+    }
+    .btn:hover::before{left:100%}
+    .btn:hover{
+      background:rgba(229,9,20,.1);
+      border-color:rgba(229,9,20,.25);
+      transform:translateY(-2px);
+      box-shadow:0 6px 20px rgba(229,9,20,.12)
+    }
+    .btn.primary{
+      background:linear-gradient(135deg,#e50914 0%,#b20710 100%);
+      color:#fff;border:none;font-weight:600;
+      box-shadow:0 6px 20px rgba(229,9,20,.25),inset 0 1px 0 0 rgba(255,255,255,.12)
+    }
+    .btn.primary:hover{
+      transform:translateY(-2px);
+      box-shadow:0 10px 28px rgba(229,9,20,.35),inset 0 1px 0 0 rgba(255,255,255,.18);
+      background:linear-gradient(135deg,#f40612 0%,#e50914 100%)
+    }
 
-    .grid{margin-top:14px;display:grid;grid-template-columns:repeat(12,1fr);gap:14px}
-    .card{
-      grid-column:span 6;
-      background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:14px;
-      box-shadow:var(--shadow);
-      display:flex;flex-direction:column;gap:10px;
-      cursor:pointer;user-select:none
+    .grid{
+      margin-top:56px;
+      display:grid;
+      grid-template-columns:repeat(auto-fit,minmax(490px,1fr));
+      gap:22px
     }
-    .card:hover{background:#171717}
-    .card:focus{outline:none;border-color:#2f2f2f}
-    .cardHead{display:flex;gap:12px;align-items:center;min-width:0}
+    .card{
+      background:var(--panel);
+      border:1px solid rgba(229,9,20,.08);
+      border-radius:18px;
+      padding:26px;
+      box-shadow:var(--card-glow);
+      display:flex;flex-direction:column;gap:15px;
+      cursor:pointer;user-select:none;
+      transition:all .3s ease;
+      position:relative;overflow:hidden
+    }
+    .card::before{
+      content:'';position:absolute;top:0;left:0;right:0;height:1px;
+      background:linear-gradient(90deg,transparent,rgba(229,9,20,.25),transparent);
+      opacity:0;transition:opacity .3s ease
+    }
+    .card:hover{
+      background:var(--panel2);
+      border-color:rgba(229,9,20,.15);
+      transform:translateY(-3px);
+      box-shadow:0 12px 32px rgba(229,9,20,.1),inset 0 1px 0 0 rgba(255,255,255,.015)
+    }
+    .card:hover::before{opacity:1}
+    .card:focus{outline:none;border-color:rgba(229,9,20,.2)}
+    .cardHead{display:flex;gap:15px;align-items:center;min-width:0}
     .icon{
-      width:42px;height:42px;border-radius:14px;border:1px solid var(--border);background:#0f0f0f;
-      display:flex;align-items:center;justify-content:center;flex:0 0 auto;font-weight:900
+      width:58px;height:58px;border-radius:15px;
+      border:1px solid rgba(229,9,20,.12);
+      background:rgba(229,9,20,.05);
+      display:flex;align-items:center;justify-content:center;flex:0 0 auto;
+      font-weight:400;font-size:24px;font-family:system-ui;
+      box-shadow:0 3px 10px rgba(0,0,0,.12);
+      transition:all .3s ease;
+      position:relative;overflow:hidden
+    }
+    .icon::before{
+      content:'';position:absolute;inset:0;
+      background:linear-gradient(135deg,rgba(255,255,255,.05),transparent);
+      opacity:0;transition:opacity .3s ease
+    }
+    .card:hover .icon::before{opacity:1}
+    .card:hover .icon{
+      transform:scale(1.04);
+      box-shadow:0 5px 14px rgba(229,9,20,.12)
     }
     .titleBlock{min-width:0;flex:1}
-    .cardTitle{font-weight:900;margin:0;line-height:1.1}
+    .cardTitle{
+      font-weight:700;margin:0;line-height:1.3;font-size:19px;
+      letter-spacing:-.25px;color:var(--text)
+    }
     .cardUrl{
-      margin-top:3px;color:var(--muted);font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis
+      margin-top:5px;color:var(--muted);font-size:12px;
+      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+      font-family:'SF Mono','Monaco','Courier New',monospace;
+      opacity:.75
     }
-    .desc{color:var(--muted);margin:0;min-height:38px}
-    .tags{display:flex;flex-wrap:wrap;gap:8px}
+    .desc{
+      color:var(--muted);margin:0;min-height:46px;
+      line-height:1.6;font-size:14px;font-weight:400
+    }
+    .tags{display:flex;flex-wrap:wrap;gap:7px}
     .tag{
-      border:1px solid var(--border);background:#101010;border-radius:999px;
-      padding:4px 8px;font-size:12px;color:var(--muted)
+      border:1px solid rgba(229,9,20,.12);
+      background:rgba(229,9,20,.05);
+      border-radius:999px;
+      padding:5px 12px;font-size:12px;color:#ff8080;
+      font-weight:500;
+      transition:all .2s ease
     }
-    .tag.accent{border-color:rgba(29,185,84,.35);color:#c9ffd9}
-    .tag.info{border-color:rgba(96,165,250,.35);color:#d4e8ff}
-    .tag.warn{border-color:rgba(251,191,36,.35);color:#ffe9b7}
+    .tag:hover{
+      background:rgba(229,9,20,.08);
+      border-color:rgba(229,9,20,.2);
+      transform:translateY(-1px)
+    }
+    .tag.accent{
+      border-color:rgba(229,9,20,.15);color:#ff9090;
+      background:rgba(229,9,20,.07)
+    }
+    .tag.info{
+      border-color:rgba(96,165,250,.15);color:#93c5fd;
+      background:rgba(96,165,250,.06)
+    }
+    .tag.warn{
+      border-color:rgba(251,191,36,.15);color:#fcd34d;
+      background:rgba(251,191,36,.06)
+    }
 
-    .actions{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap}
-    .cardBtn{padding:8px 10px;border-radius:12px}
+    .actions{display:flex;gap:11px;justify-content:flex-end;flex-wrap:wrap;margin-top:9px}
+    .cardBtn{padding:10px 20px;border-radius:10px;font-size:13px}
 
     .toast{
-      position:fixed;left:14px;right:14px;bottom:14px;z-index:9999;
+      position:fixed;left:22px;right:22px;bottom:22px;z-index:9999;
       display:flex;justify-content:center;pointer-events:none
     }
     .toastCard{
-      pointer-events:auto;max-width:720px;width:fit-content;
-      border:1px solid var(--border);border-radius:14px;padding:10px 12px;background:#0f0f0f;box-shadow:var(--shadow)
+      pointer-events:auto;max-width:460px;width:fit-content;
+      border:1px solid rgba(229,9,20,.15);border-radius:15px;
+      padding:15px 20px;
+      background:rgba(36,36,36,.95);
+      backdrop-filter:blur(16px);
+      box-shadow:0 12px 32px rgba(229,9,20,.15),inset 0 1px 0 0 rgba(255,255,255,.02);
+      animation:fadeInUp .3s ease
     }
-    .toastTitle{font-weight:900;margin:0 0 2px}
-    .toastMsg{margin:0;color:var(--muted)}
+    .toastTitle{font-weight:600;margin:0 0 4px;font-size:14px}
+    .toastMsg{margin:0;color:var(--muted);font-size:13px;line-height:1.5}
 
-    @media (max-width: 920px){
-      .card{grid-column:span 12}
+    @media (max-width: 1200px){
+      .grid{grid-template-columns:1fr}
+      .hero{padding:60px 44px}
+      .heroTitle{font-size:48px}
+      .wrap{padding:44px 28px 60px}
+    }
+    @media (max-width: 768px){
+      .topbar{padding:0 22px;height:62px}
+      .brand{font-size:18px}
+      .brand img{height:32px}
+      .hero{padding:44px 26px;border-radius:20px}
+      .heroTitle{font-size:38px;letter-spacing:-.9px}
+      .heroText{font-size:15px}
+      .card{padding:20px;border-radius:16px}
+      .icon{width:52px;height:52px;font-size:19px}
+      .cardTitle{font-size:18px}
+      .wrap{padding:28px 18px 44px}
+      .grid{gap:16px;grid-template-columns:1fr}
+    }
+    @media (max-width: 480px){
+      .topbar{padding:0 16px;height:58px}
+      .hero{padding:36px 20px}
+      .heroTitle{font-size:32px}
+      .heroText{font-size:14px}
+      .btn{padding:11px 20px;font-size:14px}
     }
   </style>
 </head>
 <body>
+  <!-- Animated Orbs -->
+  <div class="orb orb1"></div>
+  <div class="orb orb2"></div>
+  <div class="orb orb3"></div>
+  
   <div class="topbar">
-    <div class="brand">Lumen Demos</div>
+    <div class="brand">
+      <img src="logo.png" alt="Logo" />
+      Lumen Demos
+    </div>
   </div>
 
   <main class="wrap">
     <section class="hero">
-      <div>
-        <h1 class="heroTitle">Explore built-in demo websites</h1>
-        <p class="heroText">
-          Click a card to open a demo. These are pure static sites that use <code>window.lumen</code> for identity, PubSub,
-          and <code>lumen://ipfs</code> content.
-        </p>
-      </div>
+      <h1 class="heroTitle">Lumen Demos</h1>
+      <p class="heroText">
+        Discover and explore interactive demos showcasing <code>Lumen</code> capabilities. 
+        Experience decentralized apps with IPFS content, real-time PubSub, and seamless identity management.
+      </p>
       <div class="heroRight">
-        <a class="btn primary" href="lumen://pubsub_chat.lumen.lmn">Open PubSub Chat</a>
+        <a class="btn primary" href="lumen://pubsub_chat.lumen.lmn">Launch Demo</a>
       </div>
     </section>
 
@@ -121,126 +367,138 @@
       <!-- PubSub Chat -->
       <div class="card" role="link" tabindex="0" data-href="lumen://pubsub_chat.lumen.lmn">
         <div class="cardHead">
-          <div class="icon" style="color:var(--accent);border-color:rgba(29,185,84,.35)">PC</div>
+          <div class="icon" style="color:#e50914;border-color:rgba(229,9,20,.15);background:linear-gradient(135deg,rgba(229,9,20,.08),rgba(229,9,20,.04))">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+          </div>
           <div class="titleBlock">
             <h2 class="cardTitle">PubSub Chat</h2>
             <div class="cardUrl">lumen://pubsub_chat.lumen.lmn</div>
           </div>
         </div>
-        <p class="desc">Signed messages (ADR-036) with micro PoW, rate-limit + per-room blocklist.</p>
+        <p class="desc">Real-time messaging with cryptographically signed messages (ADR-036), micro proof-of-work, intelligent rate limiting, and per-room blocklist management.</p>
         <div class="tags">
           <span class="tag accent">PubSub</span>
           <span class="tag info">ADR-036</span>
           <span class="tag warn">PoW</span>
         </div>
         <div class="actions">
-          <button class="btn cardBtn" type="button" data-copy="lumen://pubsub_chat.lumen.lmn">Copy link</button>
-          <a class="btn primary cardBtn" href="lumen://pubsub_chat.lumen.lmn">Open</a>
+          <button class="btn cardBtn" type="button" data-copy="lumen://pubsub_chat.lumen.lmn">Copy Link</button>
+          <a class="btn primary cardBtn" href="lumen://pubsub_chat.lumen.lmn">Launch</a>
         </div>
       </div>
 
       <!-- PubSub Live Game -->
       <div class="card" role="link" tabindex="0" data-href="lumen://pubsub_livegame.lumen.lmn">
         <div class="cardHead">
-          <div class="icon" style="color:var(--info);border-color:rgba(96,165,250,.35)">LG</div>
+          <div class="icon" style="color:#60a5fa;border-color:rgba(96,165,250,.15);background:linear-gradient(135deg,rgba(96,165,250,.08),rgba(96,165,250,.04))">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="15" rx="2" ry="2"></rect><polyline points="17 2 12 7 7 2"></polyline></svg>
+          </div>
           <div class="titleBlock">
             <h2 class="cardTitle">PubSub Live Game</h2>
             <div class="cardUrl">lumen://pubsub_livegame.lumen.lmn</div>
           </div>
         </div>
-        <p class="desc">Tiny realtime agar-like playground: signed player states broadcast over PubSub.</p>
+        <p class="desc">Multiplayer real-time agar-style game playground where signed player states are broadcast over PubSub for seamless synchronization.</p>
         <div class="tags">
           <span class="tag accent">PubSub</span>
           <span class="tag info">Realtime</span>
           <span class="tag info">ADR-036</span>
         </div>
         <div class="actions">
-          <button class="btn cardBtn" type="button" data-copy="lumen://pubsub_livegame.lumen.lmn">Copy link</button>
-          <a class="btn primary cardBtn" href="lumen://pubsub_livegame.lumen.lmn">Open</a>
+          <button class="btn cardBtn" type="button" data-copy="lumen://pubsub_livegame.lumen.lmn">Copy Link</button>
+          <a class="btn primary cardBtn" href="lumen://pubsub_livegame.lumen.lmn">Launch</a>
         </div>
       </div>
 
       <!-- Music Catalog -->
       <div class="card" role="link" tabindex="0" data-href="lumen://music_catalog.lumen.lmn">
         <div class="cardHead">
-          <div class="icon" style="color:#f472b6;border-color:rgba(244,114,182,.35)">MC</div>
+          <div class="icon" style="color:#f472b6;border-color:rgba(244,114,182,.15);background:linear-gradient(135deg,rgba(244,114,182,.08),rgba(244,114,182,.04))">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V5l12-2v13"></path><circle cx="6" cy="18" r="3"></circle><circle cx="18" cy="16" r="3"></circle></svg>
+          </div>
           <div class="titleBlock">
             <h2 class="cardTitle">Music Catalog</h2>
             <div class="cardUrl">lumen://music_catalog.lumen.lmn</div>
           </div>
         </div>
-        <p class="desc">Browse tracks and covers and play content directly from IPFS via lumen://.</p>
+        <p class="desc">Browse and stream music tracks with album covers directly from IPFS using the lumen:// protocol for decentralized content delivery.</p>
         <div class="tags">
           <span class="tag">Catalog</span>
           <span class="tag info">IPFS</span>
           <span class="tag">Media</span>
         </div>
         <div class="actions">
-          <button class="btn cardBtn" type="button" data-copy="lumen://music_catalog.lumen.lmn">Copy link</button>
-          <a class="btn primary cardBtn" href="lumen://music_catalog.lumen.lmn">Open</a>
+          <button class="btn cardBtn" type="button" data-copy="lumen://music_catalog.lumen.lmn">Copy Link</button>
+          <a class="btn primary cardBtn" href="lumen://music_catalog.lumen.lmn">Launch</a>
         </div>
       </div>
 
       <!-- Streaming Catalog -->
       <div class="card" role="link" tabindex="0" data-href="lumen://streaming_catalog.lumen.lmn">
         <div class="cardHead">
-          <div class="icon" style="color:#fbbf24;border-color:rgba(251,191,36,.35)">SC</div>
+          <div class="icon" style="color:#fbbf24;border-color:rgba(251,191,36,.15);background:linear-gradient(135deg,rgba(251,191,36,.08),rgba(251,191,36,.04))">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>
+          </div>
           <div class="titleBlock">
             <h2 class="cardTitle">Streaming Catalog</h2>
             <div class="cardUrl">lumen://streaming_catalog.lumen.lmn</div>
           </div>
         </div>
-        <p class="desc">Video streaming catalog demo (CID + covers) designed for the Lumen gateway model.</p>
+        <p class="desc">Video streaming catalog with CID-based content and cover art, optimized for the Lumen gateway architecture and decentralized delivery.</p>
         <div class="tags">
           <span class="tag">Catalog</span>
           <span class="tag info">Streaming</span>
           <span class="tag info">IPFS</span>
         </div>
         <div class="actions">
-          <button class="btn cardBtn" type="button" data-copy="lumen://streaming_catalog.lumen.lmn">Copy link</button>
-          <a class="btn primary cardBtn" href="lumen://streaming_catalog.lumen.lmn">Open</a>
+          <button class="btn cardBtn" type="button" data-copy="lumen://streaming_catalog.lumen.lmn">Copy Link</button>
+          <a class="btn primary cardBtn" href="lumen://streaming_catalog.lumen.lmn">Launch</a>
         </div>
       </div>
 
       <!-- Huge HLS Video -->
       <div class="card" role="link" tabindex="0" data-href="lumen://ipfs/bafybeihb6i6kow7ui42fpfehqtmoy5f75zkz352or2mrwk3743rlfu2gr4/master.m3u8">
         <div class="cardHead">
-          <div class="icon" style="color:#fbbf24;border-color:rgba(251,191,36,.35)">HLS</div>
+          <div class="icon" style="color:#fbbf24;border-color:rgba(251,191,36,.15);background:linear-gradient(135deg,rgba(251,191,36,.08),rgba(251,191,36,.04))">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"></polygon></svg>
+          </div>
           <div class="titleBlock">
-            <h2 class="cardTitle">HLS video</h2>
-            <div class="cardUrl">lumen://ipfs/bafybeihb6i6kow7ui42fpfehqtmoy5f75zkz352or2mrwk3743rlfu2gr4/master.m3u8</div>
+            <h2 class="cardTitle">HLS Video Stream</h2>
+            <div class="cardUrl">lumen://ipfs/bafybeihb6i6kow7ui42fpfehqtmoy5f75zkz352or2mrwk3743rlfu2gr4/...</div>
           </div>
         </div>
-        <p class="desc">Play a large HLS stream directly from IPFS (stress-test streaming + gateway selection).</p>
+        <p class="desc">High-quality HLS video streaming directly from IPFS. Perfect for stress-testing streaming performance and gateway selection algorithms.</p>
         <div class="tags">
           <span class="tag info">HLS</span>
           <span class="tag info">Video</span>
           <span class="tag">IPFS</span>
         </div>
         <div class="actions">
-          <button class="btn cardBtn" type="button" data-copy="lumen://ipfs/bafybeihb6i6kow7ui42fpfehqtmoy5f75zkz352or2mrwk3743rlfu2gr4/master.m3u8">Copy link</button>
-          <a class="btn primary cardBtn" href="lumen://ipfs/bafybeihb6i6kow7ui42fpfehqtmoy5f75zkz352or2mrwk3743rlfu2gr4/master.m3u8">Open</a>
+          <button class="btn cardBtn" type="button" data-copy="lumen://ipfs/bafybeihb6i6kow7ui42fpfehqtmoy5f75zkz352or2mrwk3743rlfu2gr4/master.m3u8">Copy Link</button>
+          <a class="btn primary cardBtn" href="lumen://ipfs/bafybeihb6i6kow7ui42fpfehqtmoy5f75zkz352or2mrwk3743rlfu2gr4/master.m3u8">Launch</a>
         </div>
       </div>
 
       <!-- Book Library -->
       <div class="card" role="link" tabindex="0" data-href="lumen://book_library.lumen.lmn">
         <div class="cardHead">
-          <div class="icon" style="color:#a78bfa;border-color:rgba(167,139,250,.35)">BL</div>
+          <div class="icon" style="color:#a78bfa;border-color:rgba(167,139,250,.15);background:linear-gradient(135deg,rgba(167,139,250,.08),rgba(167,139,250,.04))">
+            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>
+          </div>
           <div class="titleBlock">
             <h2 class="cardTitle">Book Library</h2>
             <div class="cardUrl">lumen://book_library.lumen.lmn</div>
           </div>
         </div>
-        <p class="desc">Read a curated library of books from IPFS with a simple, fast local-first UI.</p>
+        <p class="desc">Curated digital library with EPUB reader support. Browse and read books from IPFS with a fast, local-first user interface and seamless navigation.</p>
         <div class="tags">
           <span class="tag">Reader</span>
           <span class="tag info">IPFS</span>
           <span class="tag">Catalog</span>
         </div>
         <div class="actions">
-          <button class="btn cardBtn" type="button" data-copy="lumen://book_library.lumen.lmn">Copy link</button>
-          <a class="btn primary cardBtn" href="lumen://book_library.lumen.lmn">Open</a>
+          <button class="btn cardBtn" type="button" data-copy="lumen://book_library.lumen.lmn">Copy Link</button>
+          <a class="btn primary cardBtn" href="lumen://book_library.lumen.lmn">Launch</a>
         </div>
       </div>
     </section>
@@ -271,8 +529,6 @@
       function openHref(href){
         const url = String(href || '').trim();
         if (!url) return;
-        // Use an actual <a> click so Lumen's webview-preload can intercept lumen:// links
-        // without triggering the OS "choose an app" protocol prompt.
         try {
           const a = document.createElement('a');
           a.href = url;
