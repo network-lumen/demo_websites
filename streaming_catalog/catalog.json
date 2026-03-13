@@ -17,6 +17,15 @@
       "tags": ["animation", "open"],
       "category": "Featured",
       "author": "lmn1j9pnpx98cqu80tnpj9xz0jutmkw09gmlcl6y2h"
+    },
+    {
+      "title": "The Internet's Own Boy: The Story of Aaron Swartz (Brian Knappenberger)",
+      "cid": "lumen://ipfs/bafybeihxt7afpqu6g6yoir2w4zrzotmngnk755hlk6qfpwdausboukhjcq/master.m3u8",
+      "cover": "lumen://ipfs/bafybeihd3davsi7cbpvkakoej5yd6ayyd72hsk2zsx3obsml275mbo72yy",
+      "year": 2014,
+      "tags": ["open"],
+      "category": "Documentary",
+      "author": "lmn1j9pnpx98cqu80tnpj9xz0jutmkw09gmlcl6y2h"
     }
   ]
 }

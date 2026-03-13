@@ -2,6 +2,7 @@ const React = window.React;
 const { useEffect, useMemo, useRef, useState } = React;
 
 const L = () => (window && window.lumen) || null;
+let __hlsScriptPromise = null;
 
 function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
@@ -103,6 +104,76 @@ async function resolveUrl(u) {
   return raw;
 }
 
+function parseLumenIpfsTarget(u) {
+  const raw = String(u || '').trim();
+  if (!/^lumen:\/\/ipfs\//i.test(raw)) return null;
+  const body = raw.replace(/^lumen:\/\/ipfs\//i, '');
+  const match = body.match(/^([^/?#]+)(\/[^?#]*)?([?#].*)?$/);
+  if (!match) return null;
+  return {
+    cid: String(match[1] || '').trim(),
+    path: String(match[2] || '/'),
+    suffix: String(match[3] || ''),
+  };
+}
+
+function isHlsUrl(u) {
+  const raw = String(u || '').trim();
+  if (!raw) return false;
+  try {
+    const parsed = new URL(raw, window.location.href);
+    return /\.m3u8$/i.test(parsed.pathname || '');
+  } catch {}
+  return /\.m3u8(?:[?#].*)?$/i.test(raw);
+}
+
+function sanitizeHlsUrl(u) {
+  return String(u || '').replace(/%(?![0-9A-Fa-f]{2})/g, '%25');
+}
+
+function preferSameOriginIpfsSubdomainUrl(original, fallback) {
+  const parsed = parseLumenIpfsTarget(original);
+  if (!parsed || !/^bafy[a-z0-9]{20,}$/i.test(parsed.cid)) return fallback;
+  try {
+    const here = new URL(window.location.href);
+    const port = here.port ? `:${here.port}` : '';
+    return `${here.protocol}//${parsed.cid.toLowerCase()}.ipfs.localhost${port}${parsed.path || '/'}${parsed.suffix || ''}`;
+  } catch {
+    return fallback;
+  }
+}
+
+async function ensureHlsJs() {
+  if (window.Hls) return window.Hls;
+  if (__hlsScriptPromise) return __hlsScriptPromise;
+  __hlsScriptPromise = new Promise((resolve, reject) => {
+    try {
+      const existing = document.querySelector('script[data-hls-js="true"]');
+      if (existing) {
+        existing.addEventListener('load', () => resolve(window.Hls || null), { once: true });
+        existing.addEventListener('error', () => reject(new Error('Failed to load hls.js')), { once: true });
+        return;
+      }
+
+      const script = document.createElement('script');
+      script.src = 'https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js';
+      script.async = true;
+      script.dataset.hlsJs = 'true';
+      script.onload = () => resolve(window.Hls || null);
+      script.onerror = () => reject(new Error('Failed to load hls.js'));
+      document.head.appendChild(script);
+    } catch (e) {
+      reject(e);
+    }
+  });
+  try {
+    return await __hlsScriptPromise;
+  } catch (e) {
+    __hlsScriptPromise = null;
+    throw e;
+  }
+}
+
 function pickCategory(it) {
   return String(it?.category || 'Catalog').trim() || 'Catalog';
 }
@@ -133,7 +204,7 @@ function App() {
   const [items, setItems] = useState([]);
   const [hero, setHero] = useState(null);
   const [search, setSearch] = useState('');
-  const [player, setPlayer] = useState({ open: false, title: '', src: '' });
+  const [player, setPlayer] = useState({ open: false, title: '', src: '', isHls: false });
   const { toast, show: showToast, hide: hideToast } = useToast();
 
   useEffect(() => {
@@ -171,8 +242,11 @@ function App() {
   }, [items, search]);
 
   async function play(it) {
-    const src = await resolveUrl(it.cid);
-    setPlayer({ open: true, title: it.title, src });
+    const resolved = await resolveUrl(it.cid);
+    const isHls = isHlsUrl(it.cid) || isHlsUrl(resolved);
+    const src = isHls ? preferSameOriginIpfsSubdomainUrl(it.cid, resolved) : resolved;
+    console.log('[streaming_catalog] play', { original: it.cid, resolved, src, isHls });
+    setPlayer({ open: true, title: it.title, src, isHls });
   }
 
   async function pin(it) {
@@ -257,43 +331,157 @@ function App() {
     useEffect(() => { (async () => setSrc(await resolveUrl(it.cover)))(); }, [it.cover]);
     return (
       React.createElement('div', { className: 'relative w-[160px] md:w-[190px] flex-none group' },
-        React.createElement('button', { className: 'w-full text-left', onClick: () => onPlay(it) },
-          React.createElement('div', { className: 'relative overflow-hidden rounded-md bg-neutral-900 aspect-[2/3]' },
-            src ? React.createElement('img', {
-              src,
-              className: 'absolute inset-0 w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-200',
-              alt: '',
-              loading: 'lazy',
-              onError: () => console.warn('[streaming_catalog] card cover failed to load', { cover: it.cover, resolved: src })
-            }) : null,
-            React.createElement('div', { className: 'absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors' }),
-            React.createElement('div', { className: 'absolute top-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity' },
-              React.createElement('button', { className: 'px-2 py-1 rounded bg-black/70 text-xs', onClick: (e) => { e.preventDefault(); e.stopPropagation(); onTip(it); } }, 'Tip'),
-              React.createElement('button', { className: 'px-2 py-1 rounded bg-black/70 text-xs', onClick: (e) => { e.preventDefault(); e.stopPropagation(); onPin(it); } }, 'Save')
+        React.createElement('div', { className: 'relative' },
+          React.createElement('button', { className: 'w-full text-left', onClick: () => onPlay(it), type: 'button' },
+            React.createElement('div', { className: 'relative overflow-hidden rounded-md bg-neutral-900 aspect-[2/3]' },
+              src ? React.createElement('img', {
+                src,
+                className: 'absolute inset-0 w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-200',
+                alt: '',
+                loading: 'lazy',
+                onError: () => console.warn('[streaming_catalog] card cover failed to load', { cover: it.cover, resolved: src })
+              }) : null,
+              React.createElement('div', { className: 'absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors' })
+            ),
+            React.createElement('div', { className: 'mt-2' },
+              React.createElement('div', { className: 'text-sm font-semibold leading-snug' }, it.title),
+              React.createElement('div', { className: 'text-xs text-white/60 flex items-center gap-2' },
+                it.year ? React.createElement('span', null, it.year) : null
+              )
             )
           ),
-          React.createElement('div', { className: 'mt-2' },
-            React.createElement('div', { className: 'text-sm font-semibold leading-snug' }, it.title),
-            React.createElement('div', { className: 'text-xs text-white/60 flex items-center gap-2' },
-              it.year ? React.createElement('span', null, it.year) : null
-            )
+          React.createElement('div', { className: 'absolute top-2 right-2 flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity' },
+            React.createElement('button', { className: 'px-2 py-1 rounded bg-black/70 text-xs', onClick: (e) => { e.preventDefault(); e.stopPropagation(); onTip(it); }, type: 'button' }, 'Tip'),
+            React.createElement('button', { className: 'px-2 py-1 rounded bg-black/70 text-xs', onClick: (e) => { e.preventDefault(); e.stopPropagation(); onPin(it); }, type: 'button' }, 'Save')
           )
         )
       )
     );
   }
 
+  function VideoSurface({ src, isHls }) {
+    const videoRef = useRef(null);
+    const [playbackError, setPlaybackError] = useState('');
+
+    useEffect(() => {
+      let cancelled = false;
+      let hls = null;
+
+      (async () => {
+        const video = videoRef.current;
+        if (!video) return;
+
+        setPlaybackError('');
+        try {
+          video.pause?.();
+        } catch {}
+        try {
+          video.removeAttribute('src');
+          video.load?.();
+        } catch {}
+
+        if (!src) return;
+
+        if (!isHls) {
+          video.src = src;
+          return;
+        }
+
+        const safeSrc = sanitizeHlsUrl(src);
+        if (video.canPlayType('application/vnd.apple.mpegurl')) {
+          video.src = safeSrc;
+          return;
+        }
+
+        const Hls = await ensureHlsJs();
+        if (cancelled) return;
+        if (!Hls || typeof Hls.isSupported !== 'function' || !Hls.isSupported()) {
+          setPlaybackError('HLS playback is unavailable in this browser.');
+          return;
+        }
+
+        hls = new Hls({
+          lowLatencyMode: true,
+          enableWorker: false,
+          xhrSetup: (xhr, rawUrl) => {
+            const nextUrl = sanitizeHlsUrl(rawUrl);
+            if (nextUrl === rawUrl) return;
+            try {
+              xhr.open('GET', nextUrl, true);
+            } catch {}
+          },
+        });
+        hls.on(Hls.Events.MANIFEST_PARSED, () => {
+          console.log('[streaming_catalog] HLS manifest parsed', { src: safeSrc });
+          void video.play?.().catch(() => {});
+        });
+        hls.on(Hls.Events.ERROR, (_evt, data) => {
+          console.warn('[streaming_catalog] HLS error', data);
+          if (!data?.fatal) return;
+          const details = String(data?.details || data?.type || 'hls_error');
+          try {
+            if (data?.type === Hls.ErrorTypes.NETWORK_ERROR) {
+              hls.startLoad();
+              return;
+            }
+            if (data?.type === Hls.ErrorTypes.MEDIA_ERROR) {
+              hls.recoverMediaError();
+              return;
+            }
+          } catch {}
+          setPlaybackError(`Playback error: ${details}`);
+        });
+        hls.loadSource(safeSrc);
+        hls.attachMedia(video);
+      })().catch((e) => {
+        if (!cancelled) setPlaybackError(String(e?.message || e || 'Playback failed'));
+      });
+
+      return () => {
+        cancelled = true;
+        try {
+          if (hls && typeof hls.destroy === 'function') hls.destroy();
+        } catch {}
+        const video = videoRef.current;
+        if (video) {
+          try {
+            video.pause?.();
+          } catch {}
+          try {
+            video.removeAttribute('src');
+            video.load?.();
+          } catch {}
+        }
+      };
+    }, [src, isHls]);
+
+    return React.createElement(
+      React.Fragment,
+      null,
+      React.createElement('video', {
+        ref: videoRef,
+        controls: true,
+        playsInline: true,
+        autoPlay: true,
+        className: 'w-full h-[60vh] bg-black',
+      }),
+      playbackError
+        ? React.createElement('div', { className: 'px-4 py-3 text-sm text-red-200 bg-red-950/40 border-t border-red-900/60' }, playbackError)
+        : null
+    );
+  }
+
   function PlayerOverlay() {
     if (!player.open) return null;
     return (
-      React.createElement('div', { className: 'fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center p-6', onClick: () => setPlayer({ open: false, title: '', src: '' }) },
+      React.createElement('div', { className: 'fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center p-6', onClick: () => setPlayer({ open: false, title: '', src: '', isHls: false }) },
         React.createElement('div', { className: 'w-full max-w-5xl', onClick: (e) => e.stopPropagation() },
           React.createElement('div', { className: 'flex items-center justify-between mb-3' },
             React.createElement('div', { className: 'text-lg font-bold' }, player.title),
-            React.createElement('button', { className: 'px-3 py-2 rounded bg-white/10 hover:bg-white/15', onClick: () => setPlayer({ open: false, title: '', src: '' }) }, 'Close')
+            React.createElement('button', { className: 'px-3 py-2 rounded bg-white/10 hover:bg-white/15', onClick: () => setPlayer({ open: false, title: '', src: '', isHls: false }) }, 'Close')
           ),
           React.createElement('div', { className: 'bg-black rounded-lg overflow-hidden border border-white/10' },
-            React.createElement('video', { src: player.src, controls: true, playsInline: true, className: 'w-full h-[60vh] bg-black' })
+            React.createElement(VideoSurface, { src: player.src, isHls: !!player.isHls })
           )
         )
       )
