@@ -322,11 +322,6 @@ export async function loadProfileFromIPNS(adapter, profileKey) {
   return profile ? { profileCid, profile } : null;
 }
 
-export async function loadWindow(adapter, windowCid) {
-  if (!windowCid) return null;
-  return await adapter.cat(windowCid);
-}
-
 export async function hydrateWindowChunks(adapter, windowObject) {
   const refs = Array.isArray(windowObject?.chunks) ? windowObject.chunks : [];
   const chunks = [];
@@ -335,32 +330,6 @@ export async function hydrateWindowChunks(adapter, windowObject) {
     if (payload) chunks.push({ ...ref, payload });
   }
   return chunks;
-}
-
-export async function runMockIndexer(adapter) {
-  const reconstructed = [];
-  const logs = readState().pubsubLogs.filter((entry) => entry.topic === DISCOVERY_TOPIC && entry.message?.type === "lumen.live.announce");
-  for (const entry of logs) {
-    if (await adapter.verifyLiveMessage(entry.message)) {
-      upsertByKey(reconstructed, "streamId", { ...entry.message.live, indexedAt: now() });
-    }
-  }
-  updateState((state) => {
-    state.discoveredLives = reconstructed.sort((a, b) => (b.lastSeenAt || 0) - (a.lastSeenAt || 0));
-  });
-  return reconstructed.length;
-}
-
-export async function publishInvalidChunk(pubsub, live) {
-  const lastHead = live?.lastHead;
-  if (!lastHead) return false;
-  const invalid = {
-    ...lastHead,
-    seq: Number(lastHead.seq || 0) + 1000,
-    createdAt: now()
-  };
-  pubsub.publish(live.topic, invalid);
-  return true;
 }
 
 export function seedWallet() {

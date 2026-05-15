@@ -54,14 +54,6 @@ export function updateState(mutator) {
   return writeState(state);
 }
 
-export function replaceState(nextState) {
-  return writeState(normalizeState(nextState));
-}
-
-export function clearState() {
-  return writeState(cloneDefault());
-}
-
 export function onStateChange(handler) {
   const onStorage = (event) => {
     if (event.key === STORAGE_KEY) handler(readState());

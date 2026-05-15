@@ -44,15 +44,3 @@ export async function getCidPayload(cid) {
     request.onerror = () => resolve(null);
   });
 }
-
-export async function clearCidPayloads() {
-  const db = await openDb();
-  if (!db) return;
-  await new Promise((resolve) => {
-    const tx = db.transaction(STORE_NAME, "readwrite");
-    tx.objectStore(STORE_NAME).clear();
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => resolve();
-    tx.onabort = () => resolve();
-  });
-}

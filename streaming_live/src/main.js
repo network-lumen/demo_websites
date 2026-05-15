@@ -12,23 +12,19 @@ import {
   now,
   parseTags,
   produceChunk,
-  publishDiscovery,
-  publishInvalidChunk,
-  runMockIndexer,
   seedWallet,
   shortAddress,
   slugify,
   startLive,
   stopLive
 } from "./live-core.js";
-import { clearState, onStateChange, readState, replaceState, updateState } from "./store.js";
+import { onStateChange, readState, updateState } from "./store.js";
 
 const adapter = new LumenAdapter();
 const pubsub = new CrossTabPubSub(adapter);
 const els = {};
 const MEDIA_TARGET_FPS = 24;
 const MEDIA_SEGMENT_MS = 1000;
-const POSTER_FRAME_INTERVAL_MS = 125;
 const VIEWER_LIVE_WINDOW_SECONDS = 30;
 const VIEWER_START_BUFFER_SEGMENTS = Math.ceil(VIEWER_LIVE_WINDOW_SECONDS / (MEDIA_SEGMENT_MS / 1000));
 const MSE_QUEUE_PREROLL_MS = 450;
@@ -66,7 +62,6 @@ let mediaMimeType = "";
 let audioMimeType = "";
 let recorderQueue = Promise.resolve();
 let pendingAudioSegments = [];
-let viewerPosterTimer = null;
 let viewerPosterKey = "";
 let viewerPosterIndex = 0;
 let recorderActive = false;
@@ -147,9 +142,6 @@ function initElements() {
 
 function bindEvents() {
   const on = (id, event, handler) => els[id]?.addEventListener(event, handler);
-  document.querySelectorAll(".tab").forEach((tab) => {
-    tab.addEventListener("click", () => activateTab(tab.dataset.tab));
-  });
   on("studio-form", "submit", onStartLive);
   on("stop-live", "click", onStopLive);
   on("copy-live-link", "click", () => copyText(els["studio-live-link"]?.value || ""));
@@ -207,33 +199,6 @@ function scheduleStudioRender() {
   });
 }
 
-async function prepareProfileDefaults() {
-  const active = await adapter.getActiveProfile();
-  const form = els["profile-form"];
-  if (!form) return;
-  const address = active?.address || active?.walletAddress || seedWallet();
-  const pubkey = active?.pubkey || active?.pubkeyB64 || active?.pqcPublicKey || active?.publicKey || `pub_${Math.random().toString(16).slice(2)}`;
-  if (active?.name && !form.elements.pseudo.value) form.elements.pseudo.value = active.name;
-  if (address && !form.elements.wallet.value) form.elements.wallet.value = address;
-  if (pubkey && !form.elements.pubkey.value) form.elements.pubkey.value = pubkey;
-}
-
-function activateTab(name) {
-  document.querySelectorAll(".tab").forEach((tab) => tab.classList.toggle("is-active", tab.dataset.tab === name));
-  document.querySelectorAll(".view").forEach((view) => view.classList.toggle("is-active", view.id === name));
-  els["page-title"].textContent = {
-    studio: "Studio"
-  }[name] || "Lumen Live";
-}
-
-function isTabActive(name) {
-  return document.getElementById(name)?.classList.contains("is-active");
-}
-
-function getActiveTabName() {
-  return document.querySelector(".view.is-active")?.id || "studio";
-}
-
 function getLiveLinkMode() {
   return document.querySelector("input[name='liveLinkMode']:checked")?.value || "create";
 }
@@ -253,25 +218,6 @@ function renderSelectedLiveLink() {
   box.classList.toggle("is-hidden", !selectedLiveLink?.url);
   const text = box.querySelector("strong");
   if (text) text.textContent = selectedLiveLink?.url || "";
-}
-
-async function onSaveProfile(event) {
-  event.preventDefault();
-  const form = new FormData(event.currentTarget);
-  const profile = await createProfile(adapter, {
-    pseudo: form.get("pseudo"),
-    title: form.get("title"),
-    description: form.get("description"),
-    avatar: form.get("avatar"),
-    banner: form.get("banner"),
-    wallet: form.get("wallet"),
-    pubkey: form.get("pubkey"),
-    tags: form.get("tags")
-  });
-  event.currentTarget.reset();
-  await prepareProfileDefaults();
-  renderAll();
-  toast(`Profile saved: lumen://${profile.profileKey}/live`);
 }
 
 async function onStartLive(event) {
@@ -804,7 +750,7 @@ async function onStopLive() {
   renderAll();
 }
 
-async function startViewer(streamId = els["watch-live-select"]?.value || "") {
+async function startViewer(streamId = "") {
   const live = readState().discoveredLives.find((item) => item.streamId === streamId) || liveHintFromUrl(streamId);
   if (!live) {
     setViewerStatus("connecting");
@@ -1106,176 +1052,9 @@ function isViewerOffline() {
   return viewerNoNewsAgeMs() >= CONNECTIVITY_ISSUE_MS;
 }
 
-async function simulateDiscoveryEvent() {
-  const pseudo = `guest-${Math.floor(Math.random() * 999)}`;
-  const profile = await createProfile(adapter, {
-    pseudo,
-    title: "External Lumen provider",
-    description: "A discovered provider profile created by the local simulator.",
-    avatar: "",
-    banner: "",
-    wallet: seedWallet(),
-    pubkey: `pub_${pseudo}`,
-    tags: "external, discovery"
-  });
-  const streamId = `${slugify(profile.pseudo)}-${Date.now()}`;
-  const live = {
-    sessionId: `external-${streamId}`,
-    streamId,
-    profileId: profile.id,
-    pseudo: profile.pseudo,
-    title: "Simulated external announcement",
-    description: "Discovery-only live record. Start Studio for playable chunks.",
-    avatar: profile.avatar,
-    banner: profile.banner,
-    wallet: profile.wallet,
-    pubkey: profile.pubkey,
-    profileKey: profile.profileKey,
-    profileCid: profile.cid,
-    tags: ["external", "announcement"],
-    topic: `/lumen/live/${streamId}/head`,
-    status: "LIVE",
-    viewers: 20 + Math.floor(Math.random() * 100),
-    seq: 0,
-    chunks: [],
-    startedAt: now(),
-    lastSeenAt: now()
-  };
-  await publishDiscovery(adapter, pubsub, live);
-  toast("Discovery announcement published");
-}
-
-async function rebuildFromIndexer() {
-  const count = await runMockIndexer(adapter);
-  renderAll();
-  toast(`Mock indexer rebuilt ${count} live records`);
-}
-
-async function onPublishInvalidChunk() {
-  const state = readState();
-  const selectedStreamId = viewer.streamId || els["watch-live-select"].value;
-  const live = currentLive || state.activeStreams[selectedStreamId] || state.discoveredLives.find((item) => item.streamId === selectedStreamId);
-  const ok = await publishInvalidChunk(pubsub, live);
-  toast(ok ? "Invalid chunk published" : "No signed chunk head available yet");
-}
-
-async function clearDemoData() {
-  if (liveTimer) window.clearInterval(liveTimer);
-  stopDisplayCapture();
-  stopViewer();
-  currentLive = null;
-  await adapter.clearMockCidPayloads();
-  clearState();
-  renderAll();
-  toast("Local demo data cleared");
-}
-
-function exportState() {
-  const blob = new Blob([JSON.stringify(readState(), null, 2)], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = "lumen-live-v2-state.json";
-  link.click();
-  URL.revokeObjectURL(url);
-}
-
-function importState(event) {
-  const file = event.target.files?.[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = () => {
-    try {
-      replaceState(JSON.parse(String(reader.result)));
-      renderAll();
-      toast("Demo state imported");
-    } catch {
-      toast("Invalid JSON import");
-    }
-  };
-  reader.readAsText(file);
-  event.target.value = "";
-}
-
 function renderAll() {
   renderStudio();
   renderViewer();
-}
-
-function renderAdapterMode() {
-  if (!els["adapter-mode"]) return;
-  els["adapter-mode"].textContent = `Adapter: ${adapter.getMode()}`;
-}
-
-function renderDiscovery() {
-  const state = readState();
-  if (!state.discoveredLives.length) {
-    els["live-grid"].innerHTML = `<div class="panel"><h3>No lives discovered yet</h3><p>Create a profile and start a live in another tab, or simulate a discovery event.</p></div>`;
-    return;
-  }
-  els["live-grid"].innerHTML = state.discoveredLives.map((live) => {
-    const link = live.stableLinkUrl || `lumen://${live.profileKey || `${slugify(live.pseudo)}.lumen`}/live`;
-    const linkLabel = live.stableLinkUrl ? "Copy stable link" : "Copy lumen:// link";
-    const banner = normalizeImage(live.banner);
-    const bannerStyle = banner ? ` style="background-image:linear-gradient(rgba(23,32,42,.18),rgba(23,32,42,.18)),url('${escapeAttr(banner)}')"` : "";
-    return `
-      <article class="live-card">
-        <div class="live-card-banner"${bannerStyle}></div>
-        <div class="live-card-body">
-          <div class="live-provider">
-            ${renderAvatar(live.avatar, live.pseudo)}
-            <div>
-              <strong>${escapeHtml(live.pseudo || "Unknown provider")}</strong>
-              <div class="muted">${escapeHtml(shortAddress(live.wallet))}</div>
-            </div>
-          </div>
-          <div class="meta-row">
-            <span class="badge ${(live.status || "OFFLINE").toLowerCase()}">${escapeHtml(live.status || "OFFLINE")}</span>
-            <span class="muted">${Number(live.viewers || 0).toLocaleString()} viewers</span>
-            <span class="muted">seq ${Number(live.lastSeq || live.seq || 0)}</span>
-          </div>
-          <div>
-            <h3>${escapeHtml(live.title || "Untitled live")}</h3>
-            <p>${escapeHtml(live.description || "")}</p>
-          </div>
-          <div class="tag-row">${(live.tags || []).map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("")}</div>
-          <div class="button-row">
-            <button data-watch="${escapeAttr(live.streamId)}">Watch</button>
-            <button class="secondary" data-copy="${escapeAttr(link)}">${escapeHtml(linkLabel)}</button>
-          </div>
-        </div>
-      </article>
-    `;
-  }).join("");
-  els["live-grid"].querySelectorAll("[data-watch]").forEach((button) => {
-    button.addEventListener("click", () => {
-      activateTab("watch");
-      els["watch-live-select"].value = button.dataset.watch;
-      startViewer(button.dataset.watch);
-    });
-  });
-  els["live-grid"].querySelectorAll("[data-copy]").forEach((button) => {
-    button.addEventListener("click", () => copyText(button.dataset.copy));
-  });
-}
-
-function renderProfiles() {
-  if (!els["studio-profile"] || !els["profile-list"]) return;
-  const profiles = readState().profiles;
-  const selected = els["studio-profile"].value;
-  els["studio-profile"].innerHTML = profiles.length
-    ? profiles.map((profile) => `<option value="${escapeAttr(profile.id)}">${escapeHtml(profile.pseudo)} - ${escapeHtml(profile.title)}</option>`).join("")
-    : `<option value="">Create a profile first</option>`;
-  if (selected) els["studio-profile"].value = selected;
-  els["profile-list"].innerHTML = profiles.length ? profiles.map((profile) => `
-    <article class="profile-card">
-      <strong>${escapeHtml(profile.pseudo)} - ${escapeHtml(profile.title)}</strong>
-      <span class="muted">${escapeHtml(profile.description)}</span>
-      <code>lumen://${escapeHtml(profile.profileKey)}/live</code>
-      <code>/ipns/${escapeHtml(profile.profileKey)} -> ${escapeHtml(profile.cid)}</code>
-      ${profile.live ? `<span class="badge live">Profile live state: ${escapeHtml(profile.live.status)}</span>` : ""}
-    </article>
-  `).join("") : `<p>No profiles saved yet.</p>`;
 }
 
 function renderStudio() {
@@ -1290,16 +1069,6 @@ function renderStudio() {
   const link = currentLive?.stableLinkUrl || "";
   if (els["studio-live-link"]) els["studio-live-link"].value = link;
   els["studio-live-link-card"]?.classList.toggle("is-hidden", !link);
-}
-
-function renderWatchOptions() {
-  if (!els["watch-live-select"]) return;
-  const previous = els["watch-live-select"].value;
-  const lives = readState().discoveredLives;
-  els["watch-live-select"].innerHTML = lives.length ? lives.map((live) => (
-    `<option value="${escapeAttr(live.streamId)}">${escapeHtml(live.title || live.streamId)} (${escapeHtml(live.status || "OFFLINE")})</option>`
-  )).join("") : `<option value="">No lives discovered</option>`;
-  if (previous && lives.some((live) => live.streamId === previous)) els["watch-live-select"].value = previous;
 }
 
 function renderViewer() {
@@ -1388,24 +1157,6 @@ function renderMediaSegment(payload) {
   }
 }
 
-function renderMediaPoster(payload) {
-  const image = els["media-poster-image"];
-  if (!image) return;
-  const frames = posterFramesForPayload(payload);
-  if ((payload?.kind === "media-segment" || msePlayer.mediaSource) && frames.length) {
-    if (isRealVideoFrameVisible()) {
-      hideViewerPoster();
-    } else if (viewer.paused || isViewerTailWaiting() || msePlayer.mediaSource) {
-      freezeViewerPoster(payload, frames);
-    } else {
-      startViewerPosterAnimation(payload, frames);
-    }
-    if (image.src) image.classList.add("is-visible");
-  } else if (!msePlayer.mediaSource) {
-    hideViewerPoster();
-  }
-}
-
 function isRealVideoFrameVisible() {
   const video = els["current-frame-video-a"];
   return Boolean(
@@ -1436,22 +1187,6 @@ function posterFramesForPayload(payload) {
   return latest.length ? latest : [];
 }
 
-function startViewerPosterAnimation(payload, frames) {
-  const image = els["media-poster-image"];
-  if (!image || !frames.length) return;
-  const key = viewerPosterFrameKey(payload, frames);
-  if (viewerPosterKey === key) return;
-  stopViewerPosterAnimation(false);
-  viewerPosterKey = key;
-  viewerPosterIndex = 0;
-  image.src = frames[0];
-  if (frames.length <= 1) return;
-  viewerPosterTimer = window.setInterval(() => {
-    viewerPosterIndex = (viewerPosterIndex + 1) % frames.length;
-    image.src = frames[viewerPosterIndex];
-  }, POSTER_FRAME_INTERVAL_MS);
-}
-
 function freezeViewerPoster(payload, frames) {
   const image = els["media-poster-image"];
   if (!image || !frames.length) return;
@@ -1477,10 +1212,6 @@ function posterFrameIndexForCurrentTime(payload, frames) {
 }
 
 function stopViewerPosterAnimation(clearKey = true) {
-  if (viewerPosterTimer) {
-    window.clearInterval(viewerPosterTimer);
-    viewerPosterTimer = null;
-  }
   if (clearKey) viewerPosterKey = "";
 }
 
@@ -2519,37 +2250,6 @@ function sleep(ms) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
-function renderDebug() {
-  const state = readState();
-  els["debug-adapter"].textContent = JSON.stringify({ mode: adapter.getMode() }, null, 2);
-  els["debug-topics"].textContent = JSON.stringify(state.activeTopics, null, 2);
-  els["debug-pubsub"].textContent = JSON.stringify(state.pubsubLogs.slice(0, 120), null, 2);
-  els["debug-cids"].textContent = JSON.stringify(state.cidObjects, null, 2);
-  els["debug-ipns"].textContent = JSON.stringify(state.ipnsRecords, null, 2);
-  els["debug-profiles"].textContent = JSON.stringify(state.profiles, null, 2);
-  els["debug-discovered"].textContent = JSON.stringify(state.discoveredLives, null, 2);
-  els["debug-streams"].textContent = JSON.stringify(state.activeStreams, null, 2);
-  els["debug-rejected"].textContent = JSON.stringify(state.rejectedChunks, null, 2);
-}
-
-function renderChunk(chunk) {
-  return `
-    <div class="chunk">
-      <strong>#${escapeHtml(chunk.seq)}</strong>
-      <small>${new Date(chunk.createdAt || chunk.payload?.timestamp || now()).toLocaleTimeString()}</small>
-      <div>${escapeHtml(chunk.payload?.frame || "CID-backed chunk")}</div>
-      <code>${escapeHtml(chunk.cid)}</code>
-    </div>
-  `;
-}
-
-function renderAvatar(src, pseudo) {
-  const image = normalizeImage(src);
-  if (image) return `<img class="avatar" src="${escapeAttr(image)}" alt="">`;
-  const initials = String(pseudo || "LL").slice(0, 2).toUpperCase();
-  return `<div class="avatar-fallback">${escapeHtml(initials)}</div>`;
-}
-
 function appendStudioLog(text) {
   const item = document.createElement("div");
   item.className = "log-item";
@@ -2926,12 +2626,6 @@ function formatBytes(value) {
   return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
 }
 
-function normalizeImage(value) {
-  const text = String(value || "").trim();
-  if (!text || text.startsWith("bafy")) return "";
-  return text;
-}
-
 function copyText(text) {
   navigator.clipboard?.writeText(text).then(() => toast("Copied to clipboard")).catch(() => {
     const input = document.createElement("input");
@@ -3052,13 +2746,6 @@ function tryStartPendingWatch() {
   const streamId = pendingWatchStreamId;
   startViewer(streamId);
   return true;
-}
-
-function resumeLastViewer() {
-  const streamId = localStorage.getItem("lumen-live-v2-last-watch");
-  if (!streamId || !readState().discoveredLives.some((live) => live.streamId === streamId)) return;
-  activateAudienceMode();
-  startViewer(streamId);
 }
 
 document.addEventListener("DOMContentLoaded", boot);

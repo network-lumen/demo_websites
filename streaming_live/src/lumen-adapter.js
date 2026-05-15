@@ -1,5 +1,5 @@
 import { makeCidLike, signLiveMessage, verifyLiveMessage } from "./crypto.js";
-import { clearCidPayloads, getCidPayload, putCidPayload } from "./idb-cid-store.js";
+import { getCidPayload, putCidPayload } from "./idb-cid-store.js";
 import { readState, updateState } from "./store.js";
 
 function getLumen() {
@@ -140,10 +140,6 @@ export class LumenAdapter {
       console.warn("Lumen IPFS cat failed", error);
     }
     return null;
-  }
-
-  async clearMockCidPayloads() {
-    await clearCidPayloads();
   }
 
   migrateLegacyMediaChunks() {
