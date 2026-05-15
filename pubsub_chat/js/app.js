@@ -321,11 +321,35 @@ function useToast() {
   return { toast, show, hide };
 }
 
+function normalizeTransportState(input) {
+  const s = String(input || '').trim().toLowerCase();
+  if (s === 'connecting' || s === 'connected' || s === 'reconnecting' || s === 'failed' || s === 'ended') return s;
+  return 'disconnected';
+}
+
+function transportLabel(state) {
+  const s = normalizeTransportState(state);
+  if (s === 'connecting') return 'connecting';
+  if (s === 'connected') return 'connected';
+  if (s === 'reconnecting') return 'reconnecting';
+  if (s === 'failed') return 'failed';
+  if (s === 'ended') return 'ended';
+  return 'disconnected';
+}
+
 function App() {
   const [room, setRoom] = useState('lobby');
   const [nick, setNick] = useState(() => loadMyNick() || 'anon-' + randHex(3));
   const [text, setText] = useState('');
-  const [status, setStatus] = useState({ connected: false, topic: '', subId: '', address: '', topics: [] });
+  const [status, setStatus] = useState({
+    active: false,
+    connected: false,
+    transport: 'disconnected',
+    topic: '',
+    subId: '',
+    address: '',
+    topics: []
+  });
   const [err, setErr] = useState('');
   const [peerCount, setPeerCount] = useState(0);
   const [sending, setSending] = useState(false);
@@ -355,11 +379,30 @@ function App() {
   const heartbeatInFlightRef = useRef(false);
   const sendingRef = useRef(false);
   const topicRef = useRef(`lumen/pubsub_chat/v1/${String(room || 'lobby').trim().toLowerCase()}`);
+  const transportRef = useRef('disconnected');
 
   const topic = useMemo(
     () => `lumen/pubsub_chat/v1/${String(room || 'lobby').trim().toLowerCase()}`,
     [room]
   );
+
+  function setTransportState(nextTransport, patch = {}) {
+    const transport = normalizeTransportState(nextTransport);
+    transportRef.current = transport;
+    setStatus((prev) => {
+      const next = {
+        ...prev,
+        connected: transport === 'connected',
+        transport,
+      };
+      if (Object.prototype.hasOwnProperty.call(patch, 'active')) next.active = !!patch.active;
+      if (Object.prototype.hasOwnProperty.call(patch, 'topic')) next.topic = String(patch.topic || '');
+      if (Object.prototype.hasOwnProperty.call(patch, 'subId')) next.subId = String(patch.subId || '');
+      if (Object.prototype.hasOwnProperty.call(patch, 'address')) next.address = String(patch.address || '');
+      if (Object.prototype.hasOwnProperty.call(patch, 'topics')) next.topics = Array.isArray(patch.topics) ? patch.topics : [];
+      return next;
+    });
+  }
 
   useEffect(() => {
     topicRef.current = topic;
@@ -606,7 +649,7 @@ function App() {
   }
 
   async function connect() {
-    if (status.connected) return;
+    if (status.active) return;
     const mySeq = ++connectSeqRef.current;
     setErr('');
     const api = L();
@@ -628,15 +671,99 @@ function App() {
     lastRemoteSeenAtRef.current = 0;
     lastHeartbeatAtRef.current = 0;
     presenceRef.current = new Map();
+    setPeerCount(0);
+    setTransportState('connecting', {
+      active: true,
+      topic,
+      subId: '',
+      address: '',
+      topics: [],
+    });
 
     show('Connecting', `Subscribing to ${topic}`, 'info', 2200);
 
     try {
       const { address: selfAddress } = await getActiveProfile();
+      if (connectSeqRef.current !== mySeq) return;
       updateName(selfAddress, nick);
+
+      const handleStatus = (nextState, detail = {}) => {
+        if (connectSeqRef.current !== mySeq) return;
+        const previousTransport = transportRef.current;
+        const nextTopics = Array.isArray(detail?.topics) ? detail.topics : undefined;
+        const nextSubId = Object.prototype.hasOwnProperty.call(detail || {}, 'subId')
+          ? String(detail?.subId || '')
+          : undefined;
+        const transport = normalizeTransportState(nextState);
+
+        setTransportState(transport, {
+          active: true,
+          topic,
+          address: selfAddress,
+          ...(nextSubId !== undefined ? { subId: nextSubId } : {}),
+          ...(nextTopics !== undefined ? { topics: nextTopics } : {}),
+        });
+
+        if (transport === 'connecting') {
+          setErr('');
+          return;
+        }
+
+        if (transport === 'connected') {
+          setErr('');
+          if (previousTransport === 'reconnecting' || previousTransport === 'failed') {
+            show('Reconnected', `Room: ${room}`, 'success', 1800);
+            void publishSigned('profile', {}).catch(() => {});
+          }
+          return;
+        }
+
+        if (transport === 'reconnecting') {
+          setPeerCount(0);
+          const delayMs = Number(detail?.delayMs || 0) || 0;
+          const retryMsg = delayMs
+            ? `PubSub connection lost. Retrying in ${Math.max(1, Math.ceil(delayMs / 1000))}s…`
+            : 'PubSub connection lost. Retrying…';
+          setErr(retryMsg);
+          if (detail?.phase === 'scheduled' && previousTransport !== 'reconnecting') {
+            show('Reconnecting', retryMsg, 'warning', 2200);
+          }
+          return;
+        }
+
+        if (transport === 'failed') {
+          setPeerCount(0);
+          const failMsg = 'PubSub connection lost. Automatic retries exhausted. Use Retry to subscribe again.';
+          setErr(failMsg);
+          show('Connection failed', failMsg, 'error', 3200);
+        }
+      };
+
+      const handleError = (detail = {}) => {
+        if (connectSeqRef.current !== mySeq) return;
+        const message = String(detail?.error || '').trim();
+        if (!message) return;
+        if (transportRef.current === 'failed') return;
+        setErr(`PubSub error: ${message}`);
+      };
+
+      const handleEnd = (detail = {}) => {
+        if (connectSeqRef.current !== mySeq) return;
+        if (detail?.manual) return;
+        if (transportRef.current === 'connected') {
+          setErr('PubSub stream ended. Reconnecting…');
+        }
+      };
+
       const sub = await api.pubsub.subscribe(
         topic,
-        { encoding: 'json', autoConnect: true },
+        {
+          encoding: 'json',
+          autoConnect: true,
+          onStatus: handleStatus,
+          onError: handleError,
+          onEnd: handleEnd,
+        },
         async (m) => {
           try {
             setRxStats((s) => ({ ...s, total: s.total + 1 }));
@@ -801,12 +928,12 @@ function App() {
       }
 
       subRef.current.unsubscribe = sub.unsubscribe;
-      setStatus({
-        connected: true,
+      setTransportState(sub?.getState?.() || sub?.state || 'connected', {
+        active: true,
         topic,
-        subId: String(sub.subId || ''),
+        subId: String(sub?.getSubId?.() || sub?.subId || ''),
         address: selfAddress,
-        topics: Array.isArray(sub.topics) ? sub.topics : [],
+        topics: Array.isArray(sub?.getTopics?.()) ? sub.getTopics() : (Array.isArray(sub?.topics) ? sub.topics : []),
       });
       show('Connected', `Room: ${room}`, 'success', 1800);
 
@@ -815,12 +942,21 @@ function App() {
         await publishSigned('profile', {});
       } catch {}
     } catch (e) {
+      setPeerCount(0);
+      setTransportState('failed', {
+        active: false,
+        topic: '',
+        subId: '',
+        address: '',
+        topics: [],
+      });
       setErr(String(e?.message || e || 'Connect failed'));
       show('Connect failed', String(e?.message || e || 'unknown error'), 'error', 3500);
     }
   }
 
-  async function disconnect() {
+  async function disconnect(opts = {}) {
+    const silent = !!opts?.silent;
     connectSeqRef.current += 1;
     setPeerCount(0);
     try {
@@ -832,8 +968,20 @@ function App() {
       if (u) await u();
     } catch {}
     presenceRef.current = new Map();
-    setStatus({ connected: false, topic: '', subId: '', address: '', topics: [] });
-    show('Disconnected', 'Stopped listening to PubSub', 'info', 1800);
+    setErr('');
+    setTransportState('disconnected', {
+      active: false,
+      topic: '',
+      subId: '',
+      address: '',
+      topics: [],
+    });
+    if (!silent) show('Disconnected', 'Stopped listening to PubSub', 'info', 1800);
+  }
+
+  async function retryConnect() {
+    await disconnect({ silent: true });
+    await connect();
   }
 
   // PubSub peer count (best-effort)
@@ -989,6 +1137,14 @@ function App() {
     return values;
   }, [blockedByAddr]);
 
+  const statusBadge = useMemo(() => transportLabel(status.transport), [status.transport]);
+  const statusMessage = useMemo(() => {
+    if (status.connected) return `Connected as ${myDisplay}`;
+    if (status.transport === 'connecting') return 'Connecting to the room…';
+    if (status.transport === 'reconnecting') return 'Reconnecting to the room…';
+    if (status.transport === 'failed') return 'Connection lost. Use Retry to subscribe again.';
+    return 'Connect to start chatting.';
+  }, [myDisplay, status.connected, status.transport]);
   const isAlone =
     status.connected && peerCount <= 0 && nowMs() - Math.max(lastPeerSeenAtRef.current, lastRemoteSeenAtRef.current) > PEER_STALE_MS;
   const composeDisabled = !status.connected || sending;
@@ -1005,16 +1161,18 @@ function App() {
       { className: 'topbar' },
       React.createElement('div', { className: 'brand' }, 'PubSub Chat'),
       React.createElement('span', { className: 'pill' }, 'signed messages • ADR-036 • PoW'),
-      React.createElement('span', { className: 'pill' }, status.connected ? 'connected' : 'disconnected'),
-      status.connected
+      React.createElement('span', { className: 'pill' }, statusBadge),
+      status.active
         ? React.createElement('span', { className: 'pill' }, `rx: ${rxStats.accepted}/${rxStats.total}`)
         : null,
-      status.connected && rxStats.lastDrop
+      status.active && rxStats.lastDrop
         ? React.createElement('span', { className: 'pill' }, `drop: ${rxStats.lastDrop}`)
         : null,
       React.createElement('div', { style: { marginLeft: 'auto' } }),
-      status.connected
-        ? React.createElement('button', { className: 'btn danger', type: 'button', onClick: disconnect }, 'Disconnect')
+      status.active
+        ? status.transport === 'failed'
+          ? React.createElement('button', { className: 'btn primary', type: 'button', onClick: retryConnect }, 'Retry')
+          : React.createElement('button', { className: 'btn danger', type: 'button', onClick: disconnect }, 'Disconnect')
         : React.createElement('button', { className: 'btn primary', type: 'button', onClick: connect }, 'Connect')
     ),
     React.createElement(
@@ -1036,7 +1194,7 @@ function App() {
               React.createElement('input', {
                 value: room,
                 onChange: (e) => setRoom(String(e?.target?.value || '')),
-                disabled: status.connected,
+                disabled: status.active,
                 placeholder: 'lobby',
               })
             ),
@@ -1074,8 +1232,8 @@ function App() {
             ),
             status.connected
               ? React.createElement('div', { className: 'muted' }, 'Connected as ', React.createElement('b', null, myDisplay))
-              : React.createElement('div', { className: 'muted' }, 'Connect to start chatting.'),
-            status.connected && status.topics && status.topics.length
+              : React.createElement('div', { className: 'muted' }, statusMessage),
+            status.active && status.topics && status.topics.length
               ? React.createElement(
                   'div',
                   { className: 'muted', style: { fontSize: 12 } },
@@ -1084,7 +1242,7 @@ function App() {
                   status.topics.join(', ')
                 )
               : null,
-            status.connected && rxStats.lastDrop
+            status.active && rxStats.lastDrop
               ? React.createElement(
                   'div',
                   { className: 'muted', style: { fontSize: 12 } },
@@ -1131,7 +1289,7 @@ function App() {
               : React.createElement(
                   'div',
                   { className: 'muted', style: { fontSize: 12 } },
-                  status.connected ? 'No blocked users in this room.' : 'No blocked users for this room.'
+                  status.active ? 'No blocked users in this room.' : 'No blocked users for this room.'
                 ),
             err ? React.createElement('div', { className: 'danger' }, err) : null
           )
@@ -1142,8 +1300,8 @@ function App() {
           React.createElement(
             'div',
             { className: 'chatHeader' },
-            React.createElement('div', { style: { fontWeight: 900 } }, status.connected ? `#${room}` : 'Chat'),
-            React.createElement('div', { className: 'muted' }, status.connected ? 'connected' : 'offline')
+            React.createElement('div', { style: { fontWeight: 900 } }, status.active ? `#${room}` : 'Chat'),
+            React.createElement('div', { className: 'muted' }, statusBadge)
           ),
           React.createElement(
             'div',
@@ -1214,7 +1372,15 @@ function App() {
               : React.createElement(
                   'div',
                   { className: 'muted', style: { padding: 10 } },
-                  status.connected ? 'No messages yet.' : 'Connect to start chatting.'
+                  status.connected
+                    ? 'No messages yet.'
+                    : status.transport === 'reconnecting'
+                      ? 'Reconnecting to the room…'
+                      : status.transport === 'connecting'
+                        ? 'Connecting to the room…'
+                        : status.transport === 'failed'
+                          ? 'Connection lost. Use Retry to subscribe again.'
+                          : 'Connect to start chatting.'
                 )
           ),
           React.createElement(
@@ -1233,7 +1399,13 @@ function App() {
                 ? isAlone
                   ? 'No peers yet (you can still send).'
                   : 'Type a message.'
-                : 'Connect to a room to chat.',
+                : status.transport === 'reconnecting'
+                  ? 'Reconnecting to the room…'
+                  : status.transport === 'connecting'
+                    ? 'Connecting to the room…'
+                    : status.transport === 'failed'
+                      ? 'Use Retry to subscribe again.'
+                      : 'Connect to a room to chat.',
               disabled: composeDisabled,
             }),
             React.createElement(

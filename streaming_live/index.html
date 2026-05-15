@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Lumen Live</title>
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <div class="app-shell">
+      <header class="navbar">
+        <div class="brand">
+          <div class="brand-mark">LL</div>
+          <div>
+            <h1>Lumen Live</h1>
+            <p>Stable live links</p>
+          </div>
+        </div>
+        <nav class="nav-actions" aria-label="Primary">
+          <a href="#studio">Studio</a>
+          <a href="#how-to-go-live">How to go live</a>
+        </nav>
+      </header>
+
+      <main class="workspace">
+        <section class="topbar">
+          <div>
+            <p class="eyebrow">Decentralized live streaming</p>
+            <h2 id="page-title">Studio</h2>
+          </div>
+        </section>
+
+        <section id="studio" class="view is-active">
+          <div class="split-layout studio-layout">
+            <form id="studio-form" class="panel form-grid">
+              <div class="form-heading">
+                <h3>Start Live</h3>
+                <p>Choose your live metadata, grant capture permissions, then share the stable link.</p>
+              </div>
+              <div class="live-link-panel">
+                <span>Live link</span>
+                <div class="segmented-control" role="group" aria-label="Live link mode">
+                  <label><input type="radio" name="liveLinkMode" value="create" checked> Create a new live link</label>
+                  <label><input type="radio" name="liveLinkMode" value="existing"> Use an existing live link</label>
+                </div>
+                <div id="existing-live-link-tools" class="live-link-tools is-hidden">
+                  <button id="load-live-link-settings" class="secondary" type="button">Load previous settings</button>
+                  <div id="selected-live-link" class="selected-live-link is-hidden">
+                    <span>Selected live link</span>
+                    <strong></strong>
+                  </div>
+                </div>
+              </div>
+              <label>Live title <input name="title" required placeholder="Live from the edge"></label>
+              <label>Live description <textarea name="description" required placeholder="What viewers should expect"></textarea></label>
+              <label>Cover image
+                <input name="image" id="cover-image-input" type="file" accept="image/*">
+                <div id="cover-image-preview" class="image-preview is-empty">
+                  <span>No image selected</span>
+                </div>
+              </label>
+              <label>Set offline screen
+                <input name="offlineImage" id="offline-image-input" type="file" accept="image/*">
+                <div id="offline-image-preview" class="image-preview is-empty">
+                  <span>No image selected</span>
+                </div>
+              </label>
+              <label>Tags <input name="tags" placeholder="live, devlog, tutorial"></label>
+              <label>Audio source
+                <select name="audioSource" id="studio-audio-source">
+                  <option value="system">Shared window/system audio</option>
+                  <option value="microphone">Microphone</option>
+                  <option value="both">Shared audio + microphone</option>
+                  <option value="none">No audio</option>
+                </select>
+              </label>
+              <div class="button-row">
+                <button id="start-live" type="submit">Start live</button>
+                <button id="stop-live" type="button" class="danger" disabled>Stop live</button>
+              </div>
+            </form>
+
+            <div class="panel">
+              <h3>Studio output</h3>
+              <div class="metric-grid">
+                <div><span>State</span><strong id="studio-state">idle</strong></div>
+                <div><span>Chunks</span><strong id="studio-chunks">0</strong></div>
+                <div><span>Window</span><strong id="studio-window">none</strong></div>
+                <div><span>Source</span><strong id="studio-source">none</strong></div>
+              </div>
+
+              <div id="studio-live-link-card" class="share-card is-hidden">
+                <span>Share link</span>
+                <div class="share-row">
+                  <input id="studio-live-link" readonly value="">
+                  <button id="copy-live-link" type="button">Copy</button>
+                </div>
+              </div>
+
+              <div id="studio-log" class="event-log"></div>
+            </div>
+          </div>
+
+          <div id="how-to-go-live" class="panel how-to-panel">
+            <h3>How to go live</h3>
+            <div class="how-to-grid">
+              <article>
+                <strong>1. Prepare the live</strong>
+                <p>Add a title, description, optional cover image, optional offline screen, and choose the audio mode.</p>
+              </article>
+              <article>
+                <strong>2. Grant capture access</strong>
+                <p>The browser asks for the window or screen to share. Audio can come from the shared source, microphone, both, or neither.</p>
+              </article>
+              <article>
+                <strong>3. Create or reuse a stable link</strong>
+                <p>Lumen publishes live resolver records to IPNS. Viewers receive a stable <code>lumen://ipns/...</code> link instead of a changing CID.</p>
+              </article>
+              <article>
+                <strong>4. Start after the countdown</strong>
+                <p>The countdown begins only after permissions and stable link setup are done. Cancelling before it ends prevents chunks from being sent.</p>
+              </article>
+              <article>
+                <strong>5. Share the link</strong>
+                <p>Once live, the Studio shows the share URL and copies it. Viewers opening it automatically enter the player.</p>
+              </article>
+              <article>
+                <strong>6. Offline behavior</strong>
+                <p>If chunks stop arriving for a while, the player switches to OFFLINE and shows the custom offline screen when one was provided.</p>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section id="audience" class="view">
+          <div class="panel player-panel">
+            <div class="fake-player">
+              <div class="player-copy">
+                <strong id="player-title">Lumen Live Player</strong>
+                <em id="current-frame">Waiting for video</em>
+                <img id="current-frame-image" class="screen-frame" alt="">
+                <img id="offline-screen-image" class="offline-screen" alt="">
+                <div id="media-stage" class="media-stage">
+                  <img id="media-poster-image" class="media-poster" alt="">
+                  <video id="current-frame-video-a" class="media-segment" controls preload="auto"></video>
+                  <video id="current-frame-video-b" class="media-segment" preload="auto"></video>
+                </div>
+                <div id="viewer-spinner" class="viewer-spinner is-hidden" aria-label="Loading"></div>
+                <div id="waveform" class="waveform"></div>
+              </div>
+              <div class="progress-track"><div id="play-progress" class="progress-fill"></div></div>
+            </div>
+            <div class="timeline-panel">
+              <input id="viewer-timeline" class="timeline-range" type="range" min="0" max="0" step="0.1" value="0">
+              <div class="timeline-meta">
+                <span id="viewer-timecode">00:00 / 00:00</span>
+                <div class="timeline-actions">
+                  <button id="viewer-pause" class="secondary" type="button">Pause</button>
+                  <button id="viewer-mute" class="secondary" type="button">Mute</button>
+                  <input id="viewer-volume" class="volume-range" type="range" min="0" max="1" step="0.05" value="1" aria-label="Volume">
+                  <span id="viewer-volume-label">100%</span>
+                  <button id="viewer-go-live" class="secondary" type="button">Go live</button>
+                  <button id="viewer-fullscreen" class="secondary" type="button">Fullscreen</button>
+                </div>
+              </div>
+            </div>
+            <div class="live-description-card">
+              <span>About this live</span>
+              <p id="viewer-description">No description provided.</p>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <div id="countdown-modal" class="modal-overlay is-hidden" role="dialog" aria-modal="true" aria-labelledby="countdown-title">
+      <div class="modal-content">
+        <h3 id="countdown-title">Your live starts in</h3>
+        <strong id="countdown-value">3</strong>
+        <p id="countdown-message">Capture permissions are ready. The stream will start when the countdown ends.</p>
+        <button id="cancel-countdown" type="button" class="secondary">Cancel</button>
+      </div>
+    </div>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
